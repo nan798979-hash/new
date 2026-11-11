@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>枫桥夜泊 · 诗意探险</title>
+<style>
+:root{--bg:#f4efe2;--fg:#2b2a33;--panel:#fffaf0;--line:#3b3a4a;--accent:#3b6ea5;--bar:#e6dec8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15161f;--fg:#ecebf3;--panel:#232433;--line:#8a89a8;--accent:#7fb0e8;--bar:#1d1e2b}}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
+#app{max-width:520px;margin:0 auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+#bar{background:var(--bar);border:2px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+#wrap{position:relative}
+canvas{width:100%;image-rendering:pixelated;border:3px solid var(--line);border-radius:6px;background:#000;display:block}
+#dlg{position:absolute;left:0;right:0;bottom:0;top:0;display:none;align-items:flex-end;background:rgba(0,0,0,.25)}
+#box{background:var(--panel);border:3px solid var(--line);border-radius:8px;margin:8px;padding:12px;width:100%;max-height:92%;overflow:auto;box-sizing:border-box}
+#nm{font-weight:700;color:var(--accent);margin-bottom:4px}
+#tx{line-height:1.7;font-size:15px;white-space:pre-wrap}
+.btn{display:block;width:100%;margin-top:8px;padding:10px;font:inherit;font-size:15px;color:var(--fg);background:var(--bar);border:2px solid var(--line);border-radius:6px;cursor:pointer;text-align:left}
+.btn:active{background:var(--accent);color:#fff}
+.bad{color:#c0392b}.good{color:#2e8b57}
+#pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,52px);gap:6px;justify-content:center}
+#pad button{font-size:22px;border:2px solid var(--line);border-radius:8px;background:var(--bar);color:var(--fg)}
+#pad button:active{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar"><span id="cnt"></span><span id="keys"></span></div>
+  <div id="wrap"><canvas id="c"></canvas><div id="dlg"><div id="box"><div id="nm"></div><div id="tx"></div><div id="bt"></div></div></div></div>
+  <div id="pad"><span></span><button data-d="u">▲</button><span></span><button data-d="l">◀</button><button data-d="d">▼</button><button data-d="r">▶</button></div>
+</div>
+<script>
+const MAP_TEXT = `
+TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+T....*...#TT....TT#OO....OO#T.......TT
+T.1......#T.3...,,#O.HHH..O#T..,,...TT
+T....,,..#T.....,,#O.HHH..O#T..,,..7.T
+T.@..,,..#........#....=...#.........T
+T........A........B========C.........W
+T..2.....#..4...T.#....5...#...*.....T
+T..*.....#T.....TT#...6....#.........T
+T~~~~~~~~#TT*...TT#.*....*.#T.......TT
+T~~~~~~~~#TTT...TT#OO....OO#TT.....TTT
+T~~~~~~~~#TTTTTTTT#OOOOOOOO#TTTTTTTTTT
+TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+`;
+const MAP_LEGEND = {};
+
+const CREATURES = [
+  // ===== 客船 =====
+  { id: "n_boatman", name: "船家", where: "map", mark: "1", sprite: "villager_orange",
+    dialogue: ["「月落」写出夜深,「乌啼」是夜里的声音,「霜满天」写出寒意。", "客船这一带的线索,记好啦!"] },
+  { id: "c_crow", name: "乌鸦", where: "map", mark: "2", sprite: "starbug_3", area: "客船",
+    greet: "嘎——嘎——我是夜里啼叫的乌鸦!",
+    question: "「月落乌啼霜满天」中的“乌啼”指什么?",
+    choices: ["乌鸦鸣叫", "乌鸦飞走", "乌鸦睡觉"], answerIndex: 0,
+    mistakes: {
+      "乌鸦飞走": "“啼”是鸣叫的意思,不是飞走。诗人是“听见”了乌鸦的叫声。",
+      "乌鸦睡觉": "诗里写的是乌鸦在夜里叫,所以才有“乌啼”的声音。"
+    },
+    hint: "想一想,“啼”字和声音有什么关系?",
+    explanation: "“啼”是鸣叫;诗人听见乌鸦叫声,写出夜里的声音。",
+    success: "嘎!你听懂我的叫声了,我加入你的队伍!" },
+  { id: "c_frost", name: "霜花精灵", where: "grass", sprite: "bubblefin_2", area: "客船(草丛里)", gives: "a",
+    greet: "一片凉凉的霜花飘了出来……",
+    question: "「霜满天」主要让人感受到什么?",
+    choices: ["天气炎热", "夜色寒凉", "阳光明亮"], answerIndex: 1,
+    mistakes: {
+      "天气炎热": "霜是天气很冷时才会出现的,怎么会炎热呢?",
+      "阳光明亮": "这是月落之后的深夜,不是阳光明亮的白天。"
+    },
+    hint: "霜是在什么样的天气里结的?",
+    explanation: "“霜”让人感受到深夜的寒意,也烘托出清冷的气氛。",
+    success: "好冷也好美!我加入你。你得到了「诗意钥匙」,可以打开第一扇门了!" },
+
+  // ===== 江边枫树 =====
+  { id: "n_elder", name: "江边老人", where: "map", mark: "3", sprite: "villager_elder",
+    dialogue: ["「江枫」和「渔火」是诗人夜泊时看到的景物;「愁眠」点出了诗人的心情。"] },
+  { id: "c_maple", name: "枫叶精灵", where: "map", mark: "4", sprite: "emberchick_2", area: "江边枫树",
+    greet: "沙沙沙,我是江边的枫叶精灵!",
+    question: "「江枫」指什么?",
+    choices: ["江上的船帆", "山上的松树", "江边的枫树"], answerIndex: 2,
+    mistakes: {
+      "江上的船帆": "“枫”是一种树,“江枫”是长在江边的枫树。",
+      "山上的松树": "“枫”不是松,而且“江”字说明它在江边。"
+    },
+    hint: "“江”在哪里?“枫”又是什么?",
+    explanation: "“江枫”是江边的枫树,是诗人夜泊时所见的景物。",
+    success: "沙沙!你认出我啦,我加入你!" },
+  { id: "c_fire", name: "渔火精灵", where: "grass", sprite: "emberchick_3", area: "江边枫树(草丛里)", gives: "b",
+    greet: "一点暖暖的灯火在草丛里闪着……",
+    question: "「渔火」指什么?",
+    choices: ["天上的星星", "渔船上的灯火", "寺里的烛火"], answerIndex: 1,
+    mistakes: {
+      "天上的星星": "“渔火”在江上,是渔人点的灯,不是天上的星星。",
+      "寺里的烛火": "寺庙在姑苏城外的寒山上,“渔火”是江面渔船上的光。"
+    },
+    hint: "“渔”字是谁的?",
+    explanation: "“渔火”是江上渔船的灯火,点缀了夜色。",
+    success: "暖暖的!我加入你。你得到了第二把「诗意钥匙」!" },
+
+  // ===== 寒山寺 =====
+  { id: "n_monk", name: "寺中小和尚", where: "map", mark: "5", sprite: "villager_purple",
+    dialogue: ["寒山寺在姑苏城外,诗人夜半听见的,就是寺里传来的钟声。"] },
+  { id: "c_bell", name: "钟声精灵", where: "map", mark: "6", sprite: "pebbleshell_2", area: "寒山寺", gives: "c",
+    greet: "当——当——我是从寺里传来的钟声!",
+    question: "「夜半钟声到客船」写的是诗人的哪种感受?",
+    choices: ["清晨听见鸟叫", "白天看见寺庙", "夜半听见远处钟声"], answerIndex: 2,
+    mistakes: {
+      "清晨听见鸟叫": "诗句里是“夜半”,听到的是钟声,不是清晨的鸟叫。",
+      "白天看见寺庙": "“夜半钟声到客船”写的是听见,而且是半夜。"
+    },
+    hint: "注意“夜半”和“到”这两个字。",
+    explanation: "诗人夜半听见寒山寺的钟声传到客船,写出了夜泊时的所闻。",
+    success: "当——!你听见我了,我加入你。你得到了第三把「诗意钥匙」!" },
+
+  // ===== 客船窗边 =====
+  { id: "n_traveler", name: "夜行旅人", where: "map", mark: "7", sprite: "villager_pink",
+    dialogue: ["夜深人静时,远处传来的钟声,更容易让人感到孤单。"] },
+  { id: "c_sorrow", name: "愁思精灵", where: "grass", sprite: "leafbunny_3", area: "客船窗边(草丛里)",
+    greet: "窗边的草丛里,有一团淡淡的愁绪……",
+    question: "「愁眠」最能体现诗人什么心情?",
+    choices: ["欢快兴奋", "羁旅中的忧愁与孤独", "着急回家"], answerIndex: 1,
+    mistakes: {
+      "欢快兴奋": "“愁”字就是忧愁,和欢快兴奋正好相反。",
+      "着急回家": "诗里没有写着急,而是写夜泊异乡、难以入睡的愁绪。"
+    },
+    hint: "“愁”字是什么心情?再想想诗人是在哪里过夜。",
+    explanation: "“愁眠”写出诗人夜泊时难以排遣的愁绪;结合全诗,可以体会到羁旅的孤寂。",
+    success: "你读懂了诗人的心!我加入你。" }
+];
+
+const ITEMS = [
+  { mark: "a", name: "诗意钥匙·客船", sprite: "key", note: "收服了霜花精灵得到的钥匙,可以打开通往江边枫树的门。" },
+  { mark: "b", name: "诗意钥匙·江边", sprite: "key", note: "收服了渔火精灵得到的钥匙,可以打开通往寒山寺的门。" },
+  { mark: "c", name: "诗意钥匙·寒山寺", sprite: "key", note: "收服了钟声精灵得到的钥匙,可以打开通往客船窗边的门。" }
+];
+
+const GATES = [
+  { mark: "A", name: "客船之门", needs: "a", floor: "=",
+    lockedText: "门锁着。先在客船一带,把乌鸦和霜花精灵(在草丛里)都请来,就能得到「诗意钥匙」。",
+    openedText: "「诗意钥匙」转动了,门开了!前面是江边的枫树林。" },
+  { mark: "B", name: "枫林之门", needs: "b", floor: "=",
+    lockedText: "门锁着。把枫叶精灵和草丛里的渔火精灵都请来吧。",
+    openedText: "门开了!远处传来寒山寺的气息。" },
+  { mark: "C", name: "寒山寺之门", needs: "c", floor: "=",
+    lockedText: "门锁着。听听夜半的钟声,请钟声精灵加入你。",
+    openedText: "门开了!夜深了,前面是客船的窗边。" },
+  { mark: "W", name: "读懂诗意之门", needsAllCreatures: true,
+    openedText: "六个意象都回到了诗里:月落、乌啼、霜天、江枫、渔火、钟声。你终于读懂了诗人羁旅夜泊的孤寂与愁思!" }
+];
+
+const GAME = {
+  title: "《枫桥夜泊》诗意探险",
+  desc: "夜深了,你从客船上醒来,听见乌啼、钟声,看见江边的枫树和渔火。循着诗中的景物走一走,收服每一个意象,读懂诗人羁旅夜泊时的孤寂与愁思。",
+  ending: "你读懂了诗人的羁旅愁思,恍然大悟——原来乌啼、霜天、江枫、渔火、钟声,都在诉说同一份夜泊异乡的孤寂。",
+  teacherNotes: "古诗阅读:《枫桥夜泊》。目标:翻译诗句、认识诗中意象(月落、乌啼、霜天、江枫、渔火、钟声)、体会羁旅愁思。四个区域对应四句诗:客船(月落乌啼霜满天)→江边枫树(江枫渔火对愁眠)→寒山寺(姑苏城外寒山寺)→客船窗边(夜半钟声到客船)。可在游戏后让学生用自己的话翻译全诗,并说说哪一个意象最让他感到孤寂。"
+};
+
+</script>
+<script>
+const TS=32,VW=15,VH=11;
+const cv=document.getElementById('c'),g2=cv.getContext('2d');cv.width=VW*TS;cv.height=VH*TS;g2.imageSmoothingEnabled=false;
+const rows=MAP_TEXT.split('\n').filter(l=>l.length>0);
+const MH=rows.length,MW=rows[0].length;
+const grid=rows.map(r=>r.split(''));
+let px=1,py=1;
+for(let y=0;y<MH;y++)for(let x=0;x<MW;x++)if(grid[y][x]==='@'){px=x;py=y;grid[y][x]='.';}
+const ent={};CREATURES.filter(c=>c.where==='map').forEach(c=>ent[c.mark]=c);
+const gates={};GATES.forEach(g=>gates[g.mark]=g);
+const caught=new Set(),inv=new Set();
+const quiz=CREATURES.filter(c=>c.question);
+let busy=true,sinceEnc=0,face='d';
+const $=id=>document.getElementById(id);
+const gone=c=>c.question&&caught.has(c.id);
+function hud(){$('cnt').textContent='已收服 '+caught.size+' / '+quiz.length;$('keys').textContent=inv.size?'🔑 '+[...inv].map(k=>ITEMS.find(i=>i.mark===k).name).join('、'):'🔑 还没有钥匙';}
+function open(name){$('nm').textContent=name||'';$('tx').textContent='';$('tx').className='';$('bt').innerHTML='';$('dlg').style.display='flex';busy=true;}
+function close(){$('dlg').style.display='none';busy=false;hud();draw();}
+function btn(label,fn){const b=document.createElement('button');b.className='btn';b.textContent=label;b.onclick=fn;$('bt').appendChild(b);return b;}
+function say(name,lines,cb){lines=[].concat(lines);let i=0;open(name);(function step(){$('tx').textContent=lines[i];$('bt').innerHTML='';btn(i<lines.length-1?'继续 ▶':'好的',()=>{i++;if(i<lines.length)step();else{close();cb&&cb();}});})();}
+function give(k){if(k&&!inv.has(k)){inv.add(k);const it=ITEMS.find(i=>i.mark===k);return it;}}
+function ask(c){
+  open(c.name);
+  const show=()=>{$('tx').className='';$('tx').textContent=c.question;$('bt').innerHTML='';
+    c.choices.forEach((ch,i)=>btn(String.fromCharCode(65+i)+'  '+ch,()=>{
+      if(i===c.answerIndex){
+        caught.add(c.id);const it=give(c.gives);
+        $('tx').className='good';$('tx').textContent='✔ 答对了!\n'+c.explanation+'\n\n'+(c.success||c.name+'加入了队伍!')+(it?'\n🔑 获得「'+it.name+'」:'+it.note:'');
+        $('bt').innerHTML='';btn('继续 ▶',()=>{close();hud();if(caught.size===quiz.length)say('提示','六个意象都集齐了!去最右边的大门吧。');});
+      }else{
+        $('tx').className='bad';$('tx').textContent='✘ 再想想。\n'+((c.mistakes&&c.mistakes[ch])||c.hint||'');
+        $('bt').innerHTML='';btn('再试一次',show);
+      }}));
+    btn('先离开,等会儿再来',close).style.opacity=.7;};
+  $('tx').textContent=c.greet||'';$('bt').innerHTML='';btn('回答问题 ▶',show);
+}
+function talk(c){
+  if(c.question)return ask(c);
+  const it=give(c.gives);say(c.name,c.dialogue,()=>{});
+}
+function gate(gt,x,y){
+  if(gt.needsAllCreatures){
+    const left=quiz.filter(c=>!caught.has(c.id));
+    if(left.length)return say(gt.name,['门还没有打开。还差:\n'+left.map(c=>'· '+c.name+'('+c.area+')').join('\n')]);
+    grid[y][x]='=';return win();
+  }
+  if(gt.needs&&inv.has(gt.needs)){grid[y][x]=gt.floor||'=';say(gt.name,gt.openedText||'门开了!');draw();}
+  else say(gt.name,gt.lockedText||'门锁着。');
+}
+function win(){
+  open('🎉 通关!');$('tx').textContent=GAME.ending+'\n\n'+quiz.map(c=>'· '+c.name).join('\n');$('bt').innerHTML='';
+  btn('再玩一次',()=>location.reload());
+}
+function step(dx,dy){
+  if(busy)return;
+  const nx=px+dx,ny=py+dy;if(nx<0||ny<0||nx>=MW||ny>=MH)return;
+  const ch=grid[ny][nx];
+  if(ent[ch]&&!gone(ent[ch]))return talk(ent[ch]);
+  if(gates[ch])return gate(gates[ch],nx,ny);
+  if('.,*=+'.includes(ch)||(ent[ch]&&gone(ent[ch]))){
+    px=nx;py=ny;draw();
+    if(ch===','){
+      const left=CREATURES.filter(c=>c.where==='grass'&&!caught.has(c.id));
+      if(left.length){sinceEnc++;if(Math.random()<(GAME.grassEncounterRate||.12)||sinceEnc>=(GAME.grassPity||12)){sinceEnc=0;talk(left[0]);}}
+    }
+  }
+}
+// ---------- drawing ----------
+function R(x,y,w,h,c){g2.fillStyle=c;g2.fillRect(x,y,w,h);}
+function tile(ch,x,y,wx,wy){
+  R(x,y,TS,TS,(wx+wy)%2?'#7fc66a':'#78bf63');
+  if(ch===','){R(x,y,TS,TS,'#3f9a4a');for(let i=0;i<5;i++)R(x+3+i*6,y+10+(i%2)*8,3,14,'#2c7a38');}
+  else if(ch==='*'){R(x+10,y+10,4,4,'#f5d142');R(x+20,y+20,4,4,'#fff');}
+  else if(ch==='='||ch==='+'){R(x,y,TS,TS,ch==='='?'#d9c08a':'#a9794a');if(ch==='+')for(let i=0;i<4;i++)R(x,y+i*8,TS,2,'#7c5632');}
+  else if(ch==='T'){R(x+13,y+18,6,12,'#6b4423');R(x+3,y+2,26,20,'#2e7d32');R(x+8,y+0,16,8,'#3f9a4a');}
+  else if(ch==='~'){R(x,y,TS,TS,'#3a78c2');R(x+4,y+8,10,2,'#8fc0f0');R(x+18,y+20,10,2,'#8fc0f0');}
+  else if(ch==='O'){R(x+3,y+8,26,20,'#8a8a92');R(x+6,y+6,18,8,'#a6a6ae');}
+  else if(ch==='#'){R(x,y+6,TS,6,'#8b5a2b');R(x,y+18,TS,6,'#8b5a2b');for(let i=0;i<3;i++)R(x+3+i*11,y+2,5,26,'#a06a35');}
+  else if(ch==='H'){R(x,y,TS,TS,'#b5523b');R(x,y+TS-8,TS,8,'#8b3a2a');for(let i=0;i<4;i++)R(x,y+i*8,TS,2,'#8b3a2a');}
+  else if(gates[ch]){R(x,y,TS,TS,'#7a5a3a');R(x+3,y+3,TS-6,TS-6,'#a67c52');R(x+TS/2-2,y+4,4,TS-8,'#6b4a2a');R(x+20,y+15,5,5,'#f5d142');}
+}
+const PEOPLE={villager_green:'#3a9d5d',villager_purple:'#8a5cc2',villager_orange:'#e08a2b',villager_pink:'#e0709f',villager_elder:'#8a8a8a'};
+const ANI={leafbunny:'#7ed36a',bubblefin:'#5aaaf0',emberchick:'#f08a4a',pebbleshell:'#b09a80',starbug:'#d070d0'};
+function sprite(name,x,y){
+  if(PEOPLE[name]){R(x+10,y+4,12,12,'#f1c9a0');R(x+8,y+16,16,13,PEOPLE[name]);R(x+11,y+8,2,2,'#222');R(x+19,y+8,2,2,'#222');
+    if(name==='villager_elder'){R(x+9,y+2,14,5,'#eee');R(x+12,y+16,8,6,'#eee');}else R(x+9,y+2,14,5,'#4a3320');return;}
+  if(name==='sign'){R(x+14,y+14,4,14,'#6b4423');R(x+5,y+5,22,12,'#c9a066');return;}
+  if(name==='chest'){R(x+4,y+10,24,18,'#8b5a2b');R(x+4,y+10,24,6,'#a67c52');R(x+14,y+16,4,5,'#f5d142');return;}
+  const m=name.match(/^([a-z]+)(?:_(\d))?$/);const base=m&&ANI[m[1]]?m[1]:'leafbunny';const v=m&&m[2]?+m[2]:1;
+  g2.save();g2.filter='hue-rotate('+((v-1)*70)+'deg)';
+  R(x+5,y+10,22,17,ANI[base]);R(x+8,y+5,6,7,ANI[base]);R(x+18,y+5,6,7,ANI[base]);
+  g2.restore();R(x+10,y+15,4,4,'#fff');R(x+18,y+15,4,4,'#fff');R(x+11,y+16,2,2,'#222');R(x+19,y+16,2,2,'#222');
+}
+function draw(){
+  const ox=Math.max(0,Math.min(MW-VW,px-7)),oy=Math.max(0,Math.min(MH-VH,py-5));
+  for(let vy=0;vy<VH;vy++)for(let vx=0;vx<VW;vx++){
+    const wx=ox+vx,wy=oy+vy,ch=(grid[wy]||[])[wx]||'T',x=vx*TS,y=vy*TS;
+    tile(ent[ch]&&gone(ent[ch])?'.':ch,x,y,wx,wy);
+    if(ent[ch]&&!gone(ent[ch]))sprite(ent[ch].sprite,x,y);
+  }
+  // 草丛里的精灵不显示;玩家
+  const x=(px-ox)*TS,y=(py-oy)*TS;
+  R(x+9,y+3,14,13,'#f1c9a0');R(x+8,y+1,16,6,'#222');R(x+7,y+16,18,12,'#3b6ea5');R(x+12,y+9,2,2,'#222');R(x+18,y+9,2,2,'#222');
+}
+// ---------- input ----------
+const K={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]};
+addEventListener('keydown',e=>{const v=K[e.key];if(v){e.preventDefault();step(v[0],v[1]);}});
+const D={u:[0,-1],d:[0,1],l:[-1,0],r:[1,0]};
+document.querySelectorAll('#pad button').forEach(b=>{let t;const go=()=>step(...D[b.dataset.d]);
+  b.addEventListener('pointerdown',e=>{e.preventDefault();go();t=setInterval(go,180);});
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>clearInterval(t)));});
+hud();draw();
+open(GAME.title);$('tx').textContent=GAME.desc+'\n\n操作:方向键 / WASD 或下方按钮移动;走到人物或精灵身上就会对话;走进深绿色草丛可能遇到精灵。';
+$('bt').innerHTML='';btn('开始探险 ▶',close);
+</script>
+</body>
+</html>
